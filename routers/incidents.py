@@ -197,37 +197,3 @@ async def update_incident_status(
 
 
 
-
-
-
-
-
-
-
-
-    pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
