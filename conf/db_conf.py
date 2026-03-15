@@ -5,6 +5,7 @@ from conf.settings import settings
 engine: AsyncEngine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     pool_pre_ping=True,
+    pool_size=10
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -15,7 +16,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_database():
-    async with AsyncSessionLocal as session:
+    async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()

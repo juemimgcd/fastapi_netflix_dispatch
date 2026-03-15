@@ -9,13 +9,10 @@ from models.base import Base
 
 
 class IncidentStatus(str, enum.Enum):
-
     """
     事件状态（用 Enum 的好处：更易约束、OpenAPI/校验更清晰）
     先给三个状态，后续你想扩展 Dispatch 风格再加更多也可以。
     """
-
-
     OPEN = "OPEN"
     TRIAGED = "TRIAGED"
     CLOSED = "CLOSED"

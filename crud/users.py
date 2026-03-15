@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any
 from jose import jwt
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from utils import security
 from fastapi import HTTPException, status
 from pydantic import EmailStr
+from models.incidents import Incident
+
 
 
 async def get_user_by_email(db: AsyncSession, email: EmailStr):
@@ -16,6 +19,14 @@ async def get_user_by_email(db: AsyncSession, email: EmailStr):
 
     user = result.scalar_one_or_none()
     return user
+
+
+async def get_user_by_id(db:AsyncSession,incident_id:uuid.UUID):
+
+    stmt = select(Incident).where(Incident.id == incident_id)
+
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 
@@ -27,5 +38,15 @@ async def authenticate_user(db:AsyncSession,email:EmailStr,password:str):
     if not security.verify_password(password,user.password_hash):
         return None
     return user
+
+
+async def get_all_users(db:AsyncSession):
+    sql = select(User).order_by(User.created_at.desc())
+
+    result = await db.execute(sql)
+    return result.scalars().all()
+
+
+
 
 
