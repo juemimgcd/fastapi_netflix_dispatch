@@ -10,7 +10,7 @@ from models.users import User
 from utils.response import success_response
 from utils.auth import get_current_user
 
-router = APIRouter(prefix="/users", tags=["auth"])
+router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("/register")

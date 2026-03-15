@@ -12,9 +12,9 @@ class Base(DeclarativeBase):
         comment="created time"
     )
 
-    updated_time: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        insert_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
         comment="updated time"
     )
