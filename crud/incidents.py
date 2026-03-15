@@ -29,8 +29,6 @@ async def create_incident(
     )
 
     db.add(incident)
-    await db.commit()
-    await db.refresh(incident)
     return incident
 
 
@@ -71,7 +69,6 @@ async def get_incident_by_id_and_reporter(
     )
 
     result = await db.execute(stmt)
-
     return result.scalar_one_or_none()
 
 
@@ -109,7 +106,6 @@ async def list_incidents_visible_to_user(
             )
 
     result = await db.execute(stmt)
-
     return list(result.scalars().all())
 
 

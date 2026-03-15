@@ -11,7 +11,7 @@ from crud import users,incidents
 from models.users import User
 from models.incidents import IncidentStatus,Incident
 from utils.response import success_response
-from utils.auth import get_current_user
+from utils.auth import get_current_user, require_superuser
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -53,7 +53,7 @@ async def get_user_info(user: User = Depends(get_current_user)):
 
 @router.get("")
 async def admin_list_users(
-        admin: User = Depends(get_current_user),
+        admin: User = Depends(require_superuser),
         db: AsyncSession = Depends(get_database)
 
 ):
@@ -73,17 +73,17 @@ async def admin_list_users(
 async def assign_incident(
         incident_id: uuid.UUID,
         payload: IncidentAssignRequest,
-        admin: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_database)
+        admin: User = Depends(require_superuser),
+        db: AsyncSession = Depends(get_database),
 ):
     """
     管理员指派 incident 给某个用户：
     - 设置 assignee_id
     - 如果当前 status 为 OPEN，则自动改为 TRIAGED
     """
-    incident = await incidents.get_incident_by_id(db,incident_id=incident_id)
+    incident = await incidents.get_incident_by_id(db, incident_id=incident_id)
     if not incident:
-        raise HTTPException(status_code=404,detail="Incident not found")
+        raise HTTPException(status_code=404, detail="Incident not found")
 
     incident.assignee_id = payload.assignee_id
 

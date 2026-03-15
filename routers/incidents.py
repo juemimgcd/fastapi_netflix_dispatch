@@ -29,11 +29,12 @@ from utils.response import success_response
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
+
 @router.post("")
 async def create_incident(
-    payload: IncidentCreateRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_database),
+        payload: IncidentCreateRequest,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
 ):
     """创建 incident（reporter_id 强制使用当前用户 id）"""
     incident = await incidents.create_incident(
@@ -50,20 +51,22 @@ async def create_incident(
     data = IncidentPublic.model_validate(incident)
     return success_response(data=data)
 
+
 @router.get("/mine")
 async def list_my_incidents(
-    db: AsyncSession = Depends(get_database),
-    user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+        user: User = Depends(get_current_user),
 ):
     """查询“我创建的 incident 列表"""  #按创建时间倒序"""
     incident_list = await incidents.list_incidents_by_reporter(db, reporter_id=user.id)
     data = [IncidentPublic.model_validate(info) for info in incident_list]
     return success_response(data=data)
 
+
 @router.get("")
 async def list_incidents(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_database),
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
 ):
     """列表可见性规则（Step 6）：admin 全部；普通用户=我创建 + 指派给我"""
     if user.is_superuser:
@@ -74,11 +77,12 @@ async def list_incidents(
     data = [IncidentPublic.model_validate(u) for u in incident_list]
     return success_response(data=data)
 
+
 @router.get("/{incident_id}")
 async def get_incident_detail(
-    incident_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_database),
+        incident_id: uuid.UUID,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
 ):
     """详情可见性规则（Step 6）：reporter / assignee / admin 可看"""
     incident = await incidents.get_incident_by_id(db, incident_id)
@@ -86,9 +90,9 @@ async def get_incident_detail(
         raise HTTPException(status_code=404, detail="Incident not found")
 
     is_able_to_view = (
-        user.is_superuser
-        or incident.reporter_id == user.id
-        or incident.assignee_id == user.id
+            user.is_superuser
+            or incident.reporter_id == user.id
+            or incident.assignee_id == user.id
     )
 
     if not is_able_to_view:
@@ -98,12 +102,13 @@ async def get_incident_detail(
     data = IncidentPublic.model_validate(incident)
     return success_response(data=data)
 
+
 @router.patch("/{incident_id}/status")
 async def update_incident_status(
-    incident_id: uuid.UUID,
-    payload: IncidentStatusUpdateRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_database),
+        incident_id: uuid.UUID,
+        payload: IncidentStatusUpdateRequest,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
 ):
     incident = await incidents.get_incident_by_id(db, incident_id)
 

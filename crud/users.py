@@ -21,10 +21,8 @@ async def get_user_by_email(db: AsyncSession, email: EmailStr):
     return user
 
 
-async def get_user_by_id(db:AsyncSession,incident_id:uuid.UUID):
-
-    stmt = select(Incident).where(Incident.id == incident_id)
-
+async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    stmt = select(User).where(User.id == user_id)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
