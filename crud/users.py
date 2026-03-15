@@ -29,18 +29,3 @@ async def authenticate_user(db:AsyncSession,email:EmailStr,password:str):
     return user
 
 
-
-async def create_access_token(*, subject: str, expires_minutes: int | None = None, extra_claims: dict[str, Any] | None = None) -> str:
-
-    now = datetime.now()
-    expire = datetime.now() + timedelta(days=7)
-
-    payload: dict[str, Any] = {
-        "sub": subject,
-        "iat": int(now.timestamp()),
-        "exp": int(expire.timestamp()),
-    }
-    if extra_claims:
-        payload.update(extra_claims)
-
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)

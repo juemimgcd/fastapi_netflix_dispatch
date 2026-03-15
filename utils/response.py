@@ -4,7 +4,7 @@ from fastapi.encoders import jsonable_encoder
 
 def success_response(message:str = 'success',data=None):
     content = {
-        "code": 200,
+        "code": 0,
         "message": message,
         "data": data
     }
