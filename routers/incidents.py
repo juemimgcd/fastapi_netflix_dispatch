@@ -1,7 +1,5 @@
 """Incident 路由
-
 MVP incident + Step6 权限可见性 + Step7 状态流转
-
 路由约定：
 - POST   /api/v1/incidents                 创建（登录）
 - GET    /api/v1/incidents/mine            我创建的列表（登录）
@@ -9,23 +7,25 @@ MVP incident + Step6 权限可见性 + Step7 状态流转
 - GET    /api/v1/incidents/{incident_id}   详情（登录；reporter/assignee/admin 可见）
 - PATCH  /api/v1/incidents/{incident_id}/status  更新状态（登录；assignee/admin）
 """
-
 import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from conf.db_conf import get_database
-from crud import incidents
+from crud import incidents,comments,events
+from models.incident_events import IncidentEventType
 from models.incidents import IncidentStatus
 from models.users import User
+from schemas.events import IncidentEventPublic
 from schemas.incidents import (
     IncidentCreateRequest,
     IncidentPublic,
-    IncidentStatusUpdateRequest,
+    IncidentStatusUpdateRequest, IncidentAssignRequest,
 )
-from utils.auth import get_current_user
+from schemas.comments import CommentCreateRequest,CommentPublic
+from utils.auth import get_current_user, require_superuser
 from utils.response import success_response
+from services.incidents import can_view_incident,can_assign_incident,can_comment_incident,can_change_status,get_incident
+
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -85,7 +85,7 @@ async def get_incident_detail(
         db: AsyncSession = Depends(get_database),
 ):
     """详情可见性规则（Step 6）：reporter / assignee / admin 可看"""
-    incident = await incidents.get_incident_by_id(db, incident_id)
+    incident = await get_incident(db,incident_id=incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
@@ -103,6 +103,68 @@ async def get_incident_detail(
     return success_response(data=data)
 
 
+@router.post("/{incident_id}/assign")
+async def assign_incident(
+        incident_id: uuid.UUID,
+        payload: IncidentAssignRequest,
+        admin: User = Depends(require_superuser),
+        db: AsyncSession = Depends(get_database),
+):
+    """
+    管理员指派 incident 给某个用户：
+    - 设置 assignee_id
+    - 如果当前 status 为 OPEN，则自动改为 TRIAGED
+    - 写入 timeline 事件：
+      - ASSIGNED（如果 assignee 发生变化）
+      - （可选）如果 OPEN -> TRIAGED，则再写一条 STATUS_CHANGED
+    """
+    incident = await get_incident(db,incident_id=incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    old_assignee_id = incident.assignee_id
+    new_assignee_id = payload.assignee_id
+
+    # 1) 更新 assignee
+    incident.assignee_id = new_assignee_id
+
+    # 2) 只有在发生变化时，才写 ASSIGNED 事件（避免 timeline 噪音）
+    if old_assignee_id != new_assignee_id:
+        await events.create_event(
+            db,
+            incident_id=incident.id,
+            actor_id=admin.id,
+            type_=IncidentEventType.ASSIGNED,
+            payload={
+                "from": str(old_assignee_id) if old_assignee_id else None,
+                "to": str(new_assignee_id),
+            },
+            summary="Incident assigned",
+        )
+
+    # 3) OPEN 被指派后自动 TRIAGED（并可记录状态变更事件）
+    if incident.status == IncidentStatus.OPEN:
+        old_status = str(incident.status)
+        incident.status = IncidentStatus.TRIAGED
+
+        # 可选但推荐：让 timeline 能看出状态为何变化
+        await events.create_event(
+            db,
+            incident_id=incident.id,
+            actor_id=admin.id,
+            type_=IncidentEventType.STATUS_CHANGED,
+            payload={"from": old_status, "to": str(incident.status)},
+            summary=f"Status changed: {old_status} -> {incident.status}",
+        )
+
+    await db.commit()
+    await db.refresh(incident)
+
+    data = IncidentPublic.model_validate(incident)
+    return success_response(data=data)
+
+
+
 @router.patch("/{incident_id}/status")
 async def update_incident_status(
         incident_id: uuid.UUID,
@@ -110,12 +172,12 @@ async def update_incident_status(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_database),
 ):
-    incident = await incidents.get_incident_by_id(db, incident_id)
+    incident = await get_incident(db,incident_id=incident_id)
 
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    if not (user.is_superuser or incident.assignee_id == user.id):
+    if not can_assign_incident(user=user,incident=incident):
         raise HTTPException(
             status_code=403,
             detail="Only assignee or admin is supposed to change the status",
@@ -139,10 +201,146 @@ async def update_incident_status(
             detail=f"Invalid status transition:{current_status} -> {target}",
         )
 
+    old_status = str(incident.status)
     incident.status = IncidentStatus(target)
+
+    await events.create_event(
+        db,
+        incident_id=incident.id,
+        actor_id=user.id,
+        type_=IncidentEventType.STATUS_CHANGED,
+        payload={"from": old_status, "to": target},
+        summary=f"Status changed: {old_status} -> {target}",
+    )
 
     await db.commit()
     await db.refresh(incident)
 
     data = IncidentPublic.model_validate(incident)
     return success_response(data=data)
+
+
+@router.post("/{incident_id}/comments")
+async def create_incident_comment(
+        incident_id: uuid.UUID,
+        payload:CommentCreateRequest,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+):
+    """
+    需要完成的业务目标：
+    1) 查询 incident 是否存在（不存在 -> 404）
+       - 用 incidents.get_incident_by_id(db, incident_id)
+    2) 权限判断：admin / reporter / assignee 才能评论
+       - 复用你 get_incident_detail 的 is_able_to_view 逻辑即可
+       - 无权限 -> 403
+    3) 调用 CRUD：comment_crud.create_comment(db, incident_id=..., author_id=user.id, content=payload.content)
+    4) router 层 commit + refresh comment
+    5) 返回 success_response(data=CommentPublic.model_validate(comment))
+    """
+    incident = await incidents.get_incident_by_id(db,incident_id)
+    if not incident:
+        raise HTTPException(status_code=404,detail="Incident not found")
+
+    is_able_to_comment = can_comment_incident(user=user,incident=incident)
+
+    if is_able_to_comment:
+        comment = await comments.create_comment(
+            db,
+            incident_id=incident_id,
+            author_id=user.id,
+            content=payload.content
+        )
+
+        await db.commit()
+        await db.refresh(comment)
+
+        data = CommentPublic.model_validate(comment)
+        return success_response(data=data)
+    else:
+        raise HTTPException(status_code=403, detail="low rights")
+
+
+@router.get("/{incident_id}/comments")
+async def list_incident_comments(
+        incident_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+):
+    """
+    需要完成的业务目标：
+    1) 查询 incident 是否存在（不存在 -> 404）
+    2) 权限判断：admin / reporter / assignee 才能查看评论（同 detail）
+    3) 参数保护：
+       - limit: 最小 1；最大建议 100
+       - offset: 最小 0
+    4) 调用 CRUD：comment_crud.list_comments_by_incident(db, incident_id=..., limit=..., offset=..., order="desc")
+    5) 返回 success_response(data=[CommentPublic.model_validate(c) for c in comments])
+    """
+    incident = await incidents.get_incident_by_id(db,incident_id)
+    if not incident:
+        raise HTTPException(status_code=404,detail="Incident not found")
+
+    is_able_to_comment = can_comment_incident(user=user,incident=incident)
+
+    if is_able_to_comment:
+        comment_list = await comments.list_comments_by_incident(
+            db,
+            incident_id=incident_id,
+            limit=limit,
+            offset=offset,
+            order="desc"
+        )
+        data = [CommentPublic.model_validate(u) for u in comment_list]
+
+        return success_response(data=data)
+
+    else:
+        raise HTTPException(status_code=403, detail="low rights")
+
+
+
+@router.get("/{incident_id}/timeline")
+async def get_incident_timeline(
+        incident_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+):
+    """
+    需要完成的业务目标：
+    1) incident 必须存在（不存在 -> 404）
+    2) 权限：admin / reporter / assignee 可看（同 detail）
+    3) 参数保护：limit 1~100, offset >=0
+    4) 调用 CRUD：events.list_events_by_incident(...)
+    5) 返回 success_response(data=[IncidentEventPublic.model_validate(e) ...])
+    """
+    incident = await incidents.get_incident_by_id(db,incident_id)
+
+    if not incident:
+        raise HTTPException(status_code=404,detail="Incident not found")
+
+    is_able_to_view = can_view_incident(user=user,incident=incident)
+
+    if not is_able_to_view:
+        raise HTTPException(status_code=403,detail="Low rights")
+
+    event_list = await events.list_events_by_incident(
+        db,
+        incident_id=incident_id,
+        limit=limit,
+        offset=offset
+    )
+
+    data = [IncidentEventPublic.model_validate(u) for u in event_list]
+
+    return success_response(data=data)
+
+
+
+
+
+

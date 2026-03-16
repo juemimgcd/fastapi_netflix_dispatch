@@ -1,11 +1,9 @@
 """
 Incident 相关的 CRUD（只做数据库层的读写）
-
 原则：
 - CRUD 层只关心“怎么查/怎么写”
 - 不在这里做 HTTPException（那是 router/service 层的职责）
 """
-
 import uuid
 from sqlalchemy import select,or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +31,6 @@ async def create_incident(
 
 
 
-
 async def list_incidents_by_reporter(
         db:AsyncSession,
         reporter_id:uuid.UUID
@@ -41,7 +38,6 @@ async def list_incidents_by_reporter(
     """
     查询“我创建的 incidents”列表，按创建时间倒序
     """
-
     stmt = (
         select(Incident)
         .where(Incident.reporter_id == reporter_id)
