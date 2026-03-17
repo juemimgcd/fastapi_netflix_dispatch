@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import select,or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.incidents import Incident, IncidentStatus
+from models.team_memberships import TeamMembership
 
 
 # 创建 incident
@@ -96,13 +97,100 @@ async def list_incidents_visible_to_user(
     - 我创建的（reporter_id == user_id）
     - 指派给我的（assignee_id == user_id）
     """
-    stmt = (select(Incident)
-            .where(or_(Incident.reporter_id == user_id,Incident.assignee_id == user_id))
-            .order_by(Incident.created_at.desc())
-            )
+    my_team_ids_subq = (
+        select(TeamMembership.team_id)
+        .where(TeamMembership.user_id == user_id)
+        .subquery()
+    )
 
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    stmt = (
+        select(Incident)
+        .where(
+            or_(
+                Incident.reporter_id == user_id,
+                Incident.assignee_id == user_id,
+                Incident.team_id.in_(select(my_team_ids_subq.c.team_id)),
+                )
+        )
+        .order_by(Incident.created_at.desc())
+    )
+
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def search_incidents(
+        db: AsyncSession,
+        *,
+        user_id: uuid.UUID,
+        is_admin: bool,
+        q: str | None = None,
+        status: str | None = None,
+        team_id: uuid.UUID | None = None,
+        assignee_id: uuid.UUID | None = None,
+        reporter_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+) -> list[Incident]:
+    """
+    对 incidents 做搜索 + 过滤，并内置权限（非 admin 只能搜到可见范围）。
+
+    可见性（非 admin）：
+    - reporter_id == user_id
+    - assignee_id == user_id
+    - incident.team_id in (user's teams)
+    """
+    stmt = select(Incident)
+
+    if not is_admin:
+        my_team_ids = (
+            select(TeamMembership.team_id).where(TeamMembership.user_id == user_id)
+        )
+
+
+        stmt = stmt.where(
+            or_(
+                Incident.reporter_id == user_id,
+                Incident.assignee_id == user_id,
+                Incident.team_id.in_(my_team_ids)
+            )
+        )
+
+    if status is not None:
+        stmt = stmt.where(Incident.status == status)
+
+    if team_id is not None:
+        stmt = stmt.where(Incident.team_id == team_id)
+
+    if assignee_id is not None:
+        stmt = stmt.where(Incident.assignee_id == assignee_id)
+
+    if reporter_id is not None:
+        stmt = stmt.where(Incident.reporter_id == reporter_id)
+
+    if q:
+        # 简易 ILIKE 模糊匹配（Postgres）
+        like = f"%{q}%"
+        stmt = stmt.where(or_(Incident.title.ilike(like), Incident.description.ilike(like)))
+
+    stmt = (
+        stmt.order_by(Incident.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+
+
+
+
+
+
+
+
 
 
 

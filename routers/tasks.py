@@ -70,21 +70,22 @@ async def create_task_for_incident(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    if can_view_incident(user=user,incident=incident):
-        task = tasks.create_task(
+    if not await can_view_incident(db, user=user, incident=incident):
+        raise HTTPException(403, "low rights")
+
+    task = tasks.create_task(
             db,incident_id=incident_id,
             creator_id=user.id,
             title=payload.title,
             description=payload.description,
             assignee_id=payload.assignee_id
         )
-        await db.commit()
-        await db.refresh(task)
+    await db.commit()
+    await db.refresh(task)
 
-        return success_response(data=TaskPublic.model_validate(task))
+    return success_response(data=TaskPublic.model_validate(task))
 
-    else:
-        raise HTTPException(status_code=403, detail="low rights")
+
 
 
 
@@ -109,13 +110,12 @@ async def list_tasks_for_incident(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    if can_view_incident(user=user,incident=incident):
-        task_list = await tasks.list_tasks_by_incident(db,incident_id=incident_id,limit=limit,offset=offset)
+    if not await can_view_incident(db, user=user, incident=incident):
+        raise HTTPException(403, "low rights")
+    task_list = await tasks.list_tasks_by_incident(db,incident_id=incident_id,limit=limit,offset=offset)
 
-        data = [TaskPublic.model_validate(u) for u in task_list]
-        return success_response(data=data)
-    else:
-        raise HTTPException(status_code=403, detail="low rights")
+    data = [TaskPublic.model_validate(u) for u in task_list]
+    return success_response(data=data)
 
 
 
@@ -150,8 +150,8 @@ async def update_task_status(
     }
     old_status = str(incident.status)
     new_status = TaskStatus(payload.status)
-    if not can_view_incident(user=user,incident=incident):
-        raise HTTPException(status_code=403,detail="Low rights")
+    if not await can_view_incident(db, user=user, incident=incident):
+        raise HTTPException(403, "low rights")
     if new_status not in allowed_transformation.get(old_status,set()):
         raise HTTPException(
             status_code=400,
@@ -184,8 +184,8 @@ async def assign_task(
         raise HTTPException(status_code=404,detail="Incident not found")
 
     incident = await incidents.get_incident_by_id(db,task.incident_id)
-    if not can_view_incident(user=user,incident=incident):
-        raise HTTPException(status_code=403,detail="Low rights")
+    if not await can_view_incident(db, user=user, incident=incident):
+        raise HTTPException(403, "low rights")
 
     transferred_task = tasks.update_task_assignee(db,task=task,assignee_id=payload.assignee_id)
     await db.commit()

@@ -43,3 +43,11 @@ class Incident(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+# 在 Incident 模型里新增字段（位置随意，但要 import ForeignKey/UUID）
+# team_id 必填：每个 incident 属于一个 team
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )

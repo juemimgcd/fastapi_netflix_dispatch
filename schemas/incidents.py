@@ -18,6 +18,7 @@ class IncidentCreateRequest(BaseModel):
     """创建 incident 的请求体（客户端能传的字段）"""
     title: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    team_id: uuid.UUID
 
 
 class IncidentPublic(BaseModel):
@@ -28,6 +29,7 @@ class IncidentPublic(BaseModel):
     status: str
     reporter_id: uuid.UUID
     assignee_id: uuid.UUID | None
+    team_id: uuid.UUID
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -43,3 +45,14 @@ IncidentStatusLiteral = Literal["OPEN", "TRIAGED", "CLOSED"]
 class IncidentStatusUpdateRequest(BaseModel):
     """更新状态的请求体（Step 7 只做这个）"""
     status: IncidentStatusLiteral
+
+
+
+class IncidentSearchQuery(BaseModel):
+    q: str | None = Field(default=None, max_length=200)
+    status: IncidentStatusLiteral | None = None
+    team_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    reporter_id: uuid.UUID | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)

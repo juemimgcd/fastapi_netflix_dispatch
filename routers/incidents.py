@@ -89,15 +89,8 @@ async def get_incident_detail(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    is_able_to_view = (
-            user.is_superuser
-            or incident.reporter_id == user.id
-            or incident.assignee_id == user.id
-    )
-
-    if not is_able_to_view:
-        # 这里按你的策略：403（明确无权限）。如果想防止信息泄露也可返回 404。
-        raise HTTPException(status_code=403, detail="low rights")
+    if not await can_view_incident(db, user=user, incident=incident):
+        raise HTTPException(403, "low rights")
 
     data = IncidentPublic.model_validate(incident)
     return success_response(data=data)
@@ -177,7 +170,7 @@ async def update_incident_status(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    if not can_assign_incident(user=user,incident=incident):
+    if not await can_change_status(user=user,incident=incident):
         raise HTTPException(
             status_code=403,
             detail="Only assignee or admin is supposed to change the status",
@@ -204,7 +197,7 @@ async def update_incident_status(
     old_status = str(incident.status)
     incident.status = IncidentStatus(target)
 
-    await events.create_event(
+    event = await events.create_event(
         db,
         incident_id=incident.id,
         actor_id=user.id,
@@ -242,7 +235,7 @@ async def create_incident_comment(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_comment = can_comment_incident(user=user,incident=incident)
+    is_able_to_comment = await can_comment_incident(user=user,incident=incident)
 
     if is_able_to_comment:
         comment = await comments.create_comment(
@@ -283,7 +276,7 @@ async def list_incident_comments(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_comment = can_comment_incident(user=user,incident=incident)
+    is_able_to_comment = await can_comment_incident(user=user,incident=incident)
 
     if is_able_to_comment:
         comment_list = await comments.list_comments_by_incident(
@@ -323,7 +316,7 @@ async def get_incident_timeline(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_view = can_view_incident(user=user,incident=incident)
+    is_able_to_view = await can_view_incident(user=user,incident=incident)
 
     if not is_able_to_view:
         raise HTTPException(status_code=403,detail="Low rights")
@@ -341,6 +334,59 @@ async def get_incident_timeline(
 
 
 
+@router.get("")
+async def list_incidents(
+        q: str | None = None,
+        status: str | None = None,
+        team_id: uuid.UUID | None = None,
+        assignee_id: uuid.UUID | None = None,
+        reporter_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+):
+    q_norm = _normalize_query(q)
+
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    if offset < 0:
+        offset = 0
+
+    status_enum: IncidentStatus | None = None
+    if status is not None:
+        try:
+            status_enum = IncidentStatus(status)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid status")
+
+    incident_list = await incidents.search_incidents(
+        db,
+        user_id=user.id,
+        is_admin=user.is_superuser,
+        q=q_norm,
+        status=status,
+        team_id=team_id,
+        assignee_id=assignee_id,
+        reporter_id=reporter_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    data = [IncidentPublic.model_validate(x) for x in incident_list]
+    return success_response(data=data)
 
 
-
+def _normalize_query(q: str | None) -> str | None:
+    """
+    规范化搜索关键字：
+    - 去掉首尾空格
+    - 把连续空白（空格/制表/换行）压缩成单空格
+    - 如果最终为空，返回 None
+    """
+    if q is None:
+        return None
+    normalized = " ".join(q.split())
+    return normalized or None
