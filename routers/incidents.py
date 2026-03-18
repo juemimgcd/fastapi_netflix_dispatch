@@ -25,7 +25,7 @@ from schemas.comments import CommentCreateRequest,CommentPublic
 from utils.auth import get_current_user, require_superuser
 from utils.response import success_response
 from services.incidents import can_view_incident,can_assign_incident,can_comment_incident,can_change_status,get_incident
-from utils.cache import get_cache, get_cache_json, set_cache, make_cache_key
+from utils.cache import get_cache_json, set_cache, make_cache_key
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
