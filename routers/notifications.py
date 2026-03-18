@@ -71,7 +71,7 @@ async def set_notification_read(
         db,
         notification_id=notification_id,
     )
-    if note.user_id != user.id:
+    if note is None or note.user_id != user.id:
         raise HTTPException(status_code=404,detail="Note not found")
 
     await notifications.mark_notification_read(
@@ -102,7 +102,7 @@ async def set_all_notifications_read(
     """
     await notifications.mark_all_read(db,user_id=user.id)
     await db.commit()
-    success_response(data=None)
+    return success_response(data=None)
 
 
 

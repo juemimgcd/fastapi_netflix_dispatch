@@ -73,13 +73,14 @@ async def create_task_for_incident(
     if not await can_view_incident(db, user=user, incident=incident):
         raise HTTPException(403, "low rights")
 
-    task = tasks.create_task(
-            db,incident_id=incident_id,
-            creator_id=user.id,
-            title=payload.title,
-            description=payload.description,
-            assignee_id=payload.assignee_id
-        )
+    task = await tasks.create_task(
+        db,
+        incident_id=incident_id,
+        creator_id=user.id,
+        title=payload.title,
+        description=payload.description,
+        assignee_id=payload.assignee_id,
+    )
     await db.commit()
     await db.refresh(task)
 
@@ -140,22 +141,28 @@ async def update_task_status(
     """
     task = await tasks.get_task_by_id(db,task_id=task_id)
     if not task:
-        raise HTTPException(status_code=404,detail="Incident not found")
+        raise HTTPException(status_code=404,detail="Task not found")
     incident = await incidents.get_incident_by_id(db,task.incident_id)
+    if not incident:
+        raise HTTPException(status_code=404,detail="Incident not found")
 
     allowed_transformation = {
         "TODO":{"DONE","CANCELED"},
         "DONE":set(),
         "CANCELED":set()
     }
-    old_status = str(incident.status)
+    old_status = task.status.value
     new_status = TaskStatus(payload.status)
     if not await can_view_incident(db, user=user, incident=incident):
         raise HTTPException(403, "low rights")
-    if new_status not in allowed_transformation.get(old_status,set()):
+
+    if new_status.value == old_status:
+        return success_response(data=TaskPublic.model_validate(task))
+
+    if new_status.value not in allowed_transformation.get(old_status,set()):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status transition:{old_status} -> {new_status}",
+            detail=f"Invalid status transition:{old_status} -> {new_status.value}",
         )
 
     transferred_task = await tasks.update_task_status(db,task=task,status=new_status)
@@ -181,13 +188,19 @@ async def assign_task(
     """
     task = await tasks.get_task_by_id(db,task_id=task_id)
     if not task:
-        raise HTTPException(status_code=404,detail="Incident not found")
+        raise HTTPException(status_code=404,detail="Task not found")
 
     incident = await incidents.get_incident_by_id(db,task.incident_id)
+    if not incident:
+        raise HTTPException(status_code=404,detail="Incident not found")
     if not await can_view_incident(db, user=user, incident=incident):
         raise HTTPException(403, "low rights")
 
-    transferred_task = tasks.update_task_assignee(db,task=task,assignee_id=payload.assignee_id)
+    transferred_task = await tasks.update_task_assignee(
+        db,
+        task=task,
+        assignee_id=payload.assignee_id,
+    )
     await db.commit()
     await db.refresh(transferred_task)
 

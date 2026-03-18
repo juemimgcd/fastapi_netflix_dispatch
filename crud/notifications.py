@@ -66,10 +66,13 @@ async def list_notifications(
     - limit/offset 分页
     返回 Notification 实例列表（不要把 ORM 转 dict，这里保持 ORM 对象）
     """
+    stmt = select(Notification).where(Notification.user_id == user_id)
+
+    if unread is not None:
+        stmt = stmt.where(Notification.unread.is_(unread))
+
     stmt = (
-        select(Notification)
-        .where(Notification.user_id == user_id, unread=unread)
-        .order_by(Notification.created_at.desc())
+        stmt.order_by(Notification.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -103,7 +106,7 @@ async def mark_all_read(db: AsyncSession, user_id: uuid.UUID) -> None:
 
     stmt = (
         update(Notification)
-        .where(Notification.user_id == user_id)
+        .where(Notification.user_id == user_id, Notification.unread.is_(True))
         .values(unread=False)
     )
     await db.execute(stmt)

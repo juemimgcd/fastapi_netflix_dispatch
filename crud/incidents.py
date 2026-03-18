@@ -17,14 +17,16 @@ async def create_incident(
         db:AsyncSession,
         reporter_id:uuid.UUID,
         title:str,
-        description:str | None
+        description:str | None,
+        team_id: uuid.UUID,
 ):
 
     incident = Incident(
         reporter_id=reporter_id,
         title=title,
         description=description,
-        status=IncidentStatus.OPEN
+        status=IncidentStatus.OPEN,
+        team_id=team_id,
     )
 
     db.add(incident)

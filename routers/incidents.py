@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from conf.db_conf import get_database
-from crud import incidents,comments,events
+from crud import incidents,comments,events,teams,users
 from models.incident_events import IncidentEventType
 from models.incidents import IncidentStatus
 from models.users import User
@@ -39,11 +39,16 @@ async def create_incident(
         db: AsyncSession = Depends(get_database),
 ):
     """创建 incident（reporter_id 强制使用当前用户 id）"""
+    team = await teams.get_team_by_id(db, team_id=payload.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
     incident = await incidents.create_incident(
         db,
         reporter_id=user.id,
         title=payload.title,
         description=payload.description,
+        team_id=payload.team_id,
     )
 
     # 统一在 router 层提交事务
@@ -80,6 +85,69 @@ async def list_incidents(
     return success_response(data=data)
 
 
+@router.get("/search")
+async def search_incidents(
+        q: str | None = None,
+        status: str | None = None,
+        team_id: uuid.UUID | None = None,
+        assignee_id: uuid.UUID | None = None,
+        reporter_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_database),
+):
+    q_norm = _normalize_query(q)
+
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    if offset < 0:
+        offset = 0
+
+    if status is not None:
+        try:
+            status = IncidentStatus(status).value
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid status")
+
+    cache_key = make_cache_key(
+        prefix="incident:search:v1",
+        parts={
+            "user_id": user.id,
+            "is_admin": user.is_superuser,
+            "q": q_norm,
+            "status": status,
+            "team_id": team_id,
+            "assignee_id": assignee_id,
+            "reporter_id": reporter_id,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
+    cached = await get_cache_json(cache_key)
+    if cached is not None:
+        return success_response(data=cached)
+
+    incident_list = await incidents.search_incidents(
+        db,
+        user_id=user.id,
+        is_admin=user.is_superuser,
+        q=q_norm,
+        status=status,
+        team_id=team_id,
+        assignee_id=assignee_id,
+        reporter_id=reporter_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    data = [IncidentPublic.model_validate(x).model_dump() for x in incident_list]
+    await set_cache(cache_key,data)
+    return success_response(data=data)
+
+
 @router.get("/{incident_id}")
 async def get_incident_detail(
         incident_id: uuid.UUID,
@@ -99,8 +167,6 @@ async def get_incident_detail(
     if cached is not None:
         return success_response(data=cached)
 
-
-    """详情可见性规则（Step 6）：reporter / assignee / admin 可看"""
     incident = await get_incident(db,incident_id=incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -134,6 +200,9 @@ async def assign_incident(
 
     old_assignee_id = incident.assignee_id
     new_assignee_id = payload.assignee_id
+    assignee = await users.get_user_by_id(db, user_id=new_assignee_id)
+    if not assignee:
+        raise HTTPException(status_code=404, detail="Assignee not found")
 
     # 1) 更新 assignee
     incident.assignee_id = new_assignee_id
@@ -152,20 +221,6 @@ async def assign_incident(
             summary="Incident assigned",
         )
 
-    # 3) OPEN 被指派后自动 TRIAGED（并可记录状态变更事件）
-    if incident.status == IncidentStatus.OPEN:
-        old_status = str(incident.status)
-        incident.status = IncidentStatus.TRIAGED
-
-        # 可选但推荐：让 timeline 能看出状态为何变化
-        await events.create_event(
-            db,
-            incident_id=incident.id,
-            actor_id=admin.id,
-            type_=IncidentEventType.STATUS_CHANGED,
-            payload={"from": old_status, "to": str(incident.status)},
-            summary=f"Status changed: {old_status} -> {incident.status}",
-        )
         message = build_incident_assigned_message(incident.title)
         await create_notification_for_user(
             db=db,
@@ -174,6 +229,21 @@ async def assign_incident(
             ref_type="incident",
             ref_id=incident.id,
             message=message,
+        )
+
+    # 3) OPEN 被指派后自动 TRIAGED（并可记录状态变更事件）
+    if incident.status == IncidentStatus.OPEN:
+        old_status = incident.status.value
+        incident.status = IncidentStatus.TRIAGED
+
+        # 可选但推荐：让 timeline 能看出状态为何变化
+        await events.create_event(
+            db,
+            incident_id=incident.id,
+            actor_id=admin.id,
+            type_=IncidentEventType.STATUS_CHANGED,
+            payload={"from": old_status, "to": incident.status.value},
+            summary=f"Status changed: {old_status} -> {incident.status.value}",
         )
 
     await db.commit()
@@ -202,7 +272,7 @@ async def update_incident_status(
             detail="Only assignee or admin is supposed to change the status",
         )
 
-    current_status = str(incident.status)
+    current_status = incident.status.value
     target = payload.status
     allowed_transitions = {
         "OPEN": {"TRIAGED"},
@@ -220,10 +290,10 @@ async def update_incident_status(
             detail=f"Invalid status transition:{current_status} -> {target}",
         )
 
-    old_status = str(incident.status)
+    old_status = incident.status.value
     incident.status = IncidentStatus(target)
 
-    event = await events.create_event(
+    await events.create_event(
         db,
         incident_id=incident.id,
         actor_id=user.id,
@@ -245,11 +315,11 @@ async def update_incident_status(
     targets.discard(user.id)
 
     if targets:
-        message = build_comment_added_message(incident.title, commenter_email=user.email)
+        message = build_status_changed_message(incident.title, old_status, target)
         await create_notifications_bulk(
             db=db,
             user_ids=list(targets),
-            event_type="COMMENT_ADDED",
+            event_type="STATUS_CHANGED",
             ref_type="incident",
             ref_id=incident.id,
             message=message,
@@ -407,72 +477,6 @@ async def get_incident_timeline(
 
     data = [IncidentEventPublic.model_validate(u) for u in event_list]
 
-    return success_response(data=data)
-
-
-
-@router.get("/search")
-async def list_incidents(
-        q: str | None = None,
-        status: str | None = None,
-        team_id: uuid.UUID | None = None,
-        assignee_id: uuid.UUID | None = None,
-        reporter_id: uuid.UUID | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_database),
-):
-    q_norm = _normalize_query(q)
-
-    if limit < 1:
-        limit = 1
-    if limit > 100:
-        limit = 100
-    if offset < 0:
-        offset = 0
-
-    if status is not None:
-        try:
-            status_enum = IncidentStatus(status)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid status")
-
-
-    cache_key = make_cache_key(
-        prefix="incident:search:v1",
-        parts={
-            "user_id":user.id,
-            "is_admin": user.is_superuser,
-            "q": q_norm,
-            "status": status,
-            "team_id": team_id,
-            "assignee_id": assignee_id,
-            "reporter_id": reporter_id,
-            "limit": limit,
-            "offset": offset,
-        },
-    )
-    cached = await get_cache_json(cache_key)
-    if cached is not None:
-        return success_response(data=cached)
-
-
-    incident_list = await incidents.search_incidents(
-        db,
-        user_id=user.id,
-        is_admin=user.is_superuser,
-        q=q_norm,
-        status=status,
-        team_id=team_id,
-        assignee_id=assignee_id,
-        reporter_id=reporter_id,
-        limit=limit,
-        offset=offset,
-    )
-
-    data = [IncidentPublic.model_validate(x).model_dump() for x in incident_list]
-    await set_cache(cache_key,data)
     return success_response(data=data)
 
 

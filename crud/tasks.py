@@ -82,7 +82,8 @@ async def list_tasks_assigned_to_user(
     """
     stmt = (
         select(IncidentTask)
-        .where(IncidentTask.assignee_id == user_id, IncidentTask.status != "CANCELED")
+        .where(IncidentTask.assignee_id == user_id, IncidentTask.status != TaskStatus.CANCELED)
+        .order_by(IncidentTask.created_at.desc())
         .limit(limit)
         .offset(offset)
     )

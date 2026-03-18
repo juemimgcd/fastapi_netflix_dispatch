@@ -37,7 +37,12 @@ async def create_team(
         raise HTTPException(status_code=400,detail="Team already exits")
 
     team = await teams.create_team(db,name=payload.name)
-    membership = team_memberships.add_membership(db,team_id=team.id,user_id=admin.id,role=TeamRole('OWNER'))
+    await team_memberships.add_membership(
+        db,
+        team_id=team.id,
+        user_id=admin.id,
+        role=TeamRole.OWNER,
+    )
 
     await db.commit()
     await db.refresh(team)
@@ -89,8 +94,8 @@ async def add_team_member(
     if not team:
         raise HTTPException(status_code=404,detail="Team not found")
 
-    user = await users.get_user_by_id(db,user_id=admin.id)
-    if not user:
+    target_user = await users.get_user_by_id(db,user_id=payload.user_id)
+    if not target_user:
         raise HTTPException(status_code=404,detail="User not found")
 
     member_ship = await team_memberships.get_membership(
