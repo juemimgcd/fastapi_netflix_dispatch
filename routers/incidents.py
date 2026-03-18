@@ -25,7 +25,7 @@ from schemas.comments import CommentCreateRequest,CommentPublic
 from utils.auth import get_current_user, require_superuser
 from utils.response import success_response
 from services.incidents import can_view_incident,can_assign_incident,can_comment_incident,can_change_status,get_incident
-
+from utils.cache import get_cache, get_cache_json, set_cache, make_cache_key
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -84,6 +84,20 @@ async def get_incident_detail(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_database),
 ):
+
+    cache_key = make_cache_key(
+        prefix="incidents:detail:v1",
+        parts={
+            "incident_id": incident_id,
+            "user_id": user.id,
+            "is_admin": user.is_superuser,
+        },
+    )
+    cached = await get_cache_json(cache_key)
+    if cached is not None:
+        return success_response(data=cached)
+
+
     """详情可见性规则（Step 6）：reporter / assignee / admin 可看"""
     incident = await get_incident(db,incident_id=incident_id)
     if not incident:
@@ -92,7 +106,8 @@ async def get_incident_detail(
     if not await can_view_incident(db, user=user, incident=incident):
         raise HTTPException(403, "low rights")
 
-    data = IncidentPublic.model_validate(incident)
+    data = IncidentPublic.model_validate(incident).model_dump()
+    await set_cache(cache_key,data)
     return success_response(data=data)
 
 
@@ -334,7 +349,7 @@ async def get_incident_timeline(
 
 
 
-@router.get("")
+@router.get("/search")
 async def list_incidents(
         q: str | None = None,
         status: str | None = None,
@@ -355,12 +370,31 @@ async def list_incidents(
     if offset < 0:
         offset = 0
 
-    status_enum: IncidentStatus | None = None
     if status is not None:
         try:
             status_enum = IncidentStatus(status)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid status")
+
+
+    cache_key = make_cache_key(
+        prefix="incident:search:v1",
+        parts={
+            "user_id":user.id,
+            "is_admin": user.is_superuser,
+            "q": q_norm,
+            "status": status,
+            "team_id": team_id,
+            "assignee_id": assignee_id,
+            "reporter_id": reporter_id,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
+    cached = await get_cache_json(cache_key)
+    if cached is not None:
+        return success_response(data=cached)
+
 
     incident_list = await incidents.search_incidents(
         db,
@@ -375,7 +409,8 @@ async def list_incidents(
         offset=offset,
     )
 
-    data = [IncidentPublic.model_validate(x) for x in incident_list]
+    data = [IncidentPublic.model_validate(x).model_dump() for x in incident_list]
+    await set_cache(cache_key,data)
     return success_response(data=data)
 
 

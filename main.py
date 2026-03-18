@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from conf.db_conf import engine
 from routers import router
-
+from utils.cache import redis_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
     await engine.dispose()
+    await redis_client.close()
 
 
 app = FastAPI(lifespan=lifespan)

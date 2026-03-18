@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from conf.settings import settings
 from alembic import context
 from models.base import Base
-from models import users,incidents,incident_comments,incident_tasks,incident_events
+from models import users,incidents,incident_comments,incident_tasks,incident_events,team_memberships,teams
 
 
 
