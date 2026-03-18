@@ -22,6 +22,8 @@ from schemas.incidents import (
     IncidentStatusUpdateRequest, IncidentAssignRequest,
 )
 from schemas.comments import CommentCreateRequest,CommentPublic
+from services.notifications import build_incident_assigned_message, create_notification_for_user, \
+    build_comment_added_message, create_notifications_bulk, build_status_changed_message
 from utils.auth import get_current_user, require_superuser
 from utils.response import success_response
 from services.incidents import can_view_incident,can_assign_incident,can_comment_incident,can_change_status,get_incident
@@ -164,6 +166,15 @@ async def assign_incident(
             payload={"from": old_status, "to": str(incident.status)},
             summary=f"Status changed: {old_status} -> {incident.status}",
         )
+        message = build_incident_assigned_message(incident.title)
+        await create_notification_for_user(
+            db=db,
+            user_id=new_assignee_id,
+            event_type="INCIDENT_ASSIGNED",
+            ref_type="incident",
+            ref_id=incident.id,
+            message=message,
+        )
 
     await db.commit()
     await db.refresh(incident)
@@ -185,7 +196,7 @@ async def update_incident_status(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    if not await can_change_status(user=user,incident=incident):
+    if not await can_change_status(db=db,user=user,incident=incident):
         raise HTTPException(
             status_code=403,
             detail="Only assignee or admin is supposed to change the status",
@@ -221,6 +232,29 @@ async def update_incident_status(
         summary=f"Status changed: {old_status} -> {target}",
     )
 
+    targets: set[uuid.UUID] = set()
+    reporter_id = getattr(incident, "reporter_id", None)
+    assignee_id = getattr(incident, "assignee_id", None)
+
+    if reporter_id:
+        targets.add(reporter_id)  # type: ignore[arg-type]
+    if assignee_id:
+        targets.add(assignee_id)  # type: ignore[arg-type]
+
+    # 不通知评论者本人（避免自通知）
+    targets.discard(user.id)
+
+    if targets:
+        message = build_comment_added_message(incident.title, commenter_email=user.email)
+        await create_notifications_bulk(
+            db=db,
+            user_ids=list(targets),
+            event_type="COMMENT_ADDED",
+            ref_type="incident",
+            ref_id=incident.id,
+            message=message,
+        )
+
     await db.commit()
     await db.refresh(incident)
 
@@ -250,7 +284,7 @@ async def create_incident_comment(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_comment = await can_comment_incident(user=user,incident=incident)
+    is_able_to_comment = await can_comment_incident(db=db,user=user,incident=incident)
 
     if is_able_to_comment:
         comment = await comments.create_comment(
@@ -259,6 +293,34 @@ async def create_incident_comment(
             author_id=user.id,
             content=payload.content
         )
+
+        targets: set[uuid.UUID] = set()
+        reporter_id = getattr(incident, "reporter_id", None)
+        assignee_id = getattr(incident, "assignee_id", None)
+
+        if reporter_id:
+            targets.add(reporter_id)  # type: ignore[arg-type]
+        if assignee_id:
+            targets.add(assignee_id)  # type: ignore[arg-type]
+
+        # 不通知评论者本人（避免自通知）
+        targets.discard(user.id)
+
+        if targets:
+            message = build_comment_added_message(incident.title, commenter_email=user.email)
+            await create_notifications_bulk(
+                db=db,
+                user_ids=list(targets),
+                event_type="COMMENT_ADDED",
+                ref_type="incident",
+                ref_id=incident.id,
+                message=message,
+            )
+
+
+
+
+
 
         await db.commit()
         await db.refresh(comment)
@@ -291,7 +353,7 @@ async def list_incident_comments(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_comment = await can_comment_incident(user=user,incident=incident)
+    is_able_to_comment = await can_comment_incident(db=db,user=user,incident=incident)
 
     if is_able_to_comment:
         comment_list = await comments.list_comments_by_incident(
@@ -331,7 +393,7 @@ async def get_incident_timeline(
     if not incident:
         raise HTTPException(status_code=404,detail="Incident not found")
 
-    is_able_to_view = await can_view_incident(user=user,incident=incident)
+    is_able_to_view = await can_view_incident(db=db,user=user,incident=incident)
 
     if not is_able_to_view:
         raise HTTPException(status_code=403,detail="Low rights")
