@@ -8,7 +8,12 @@ from utils.cache import redis_client
 async def lifespan(app: FastAPI):
     yield
     await engine.dispose()
-    await redis_client.close()
+    # redis-py 5.x recommends aclose(); keep compatibility with older versions.
+    close = getattr(redis_client, "aclose", None)
+    if close is not None:
+        await close()
+    else:
+        await redis_client.close()
 
 
 app = FastAPI(lifespan=lifespan)

@@ -5,7 +5,7 @@ celery = Celery(
     "notification_tasks",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["tasks.mail"],
+    include=["utils.mail"],
 )
 celery.conf.update(
     task_serializer="json",

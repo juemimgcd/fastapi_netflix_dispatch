@@ -9,8 +9,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    ASYNC_DATABASE_URL: str
-    REDIS_URL: str
+    ASYNC_DATABASE_URL: str = Field(
+        validation_alias=AliasChoices("ASYNC_DATABASE_URL", "DATABASE_URL")
+    )
+    REDIS_URL: str = "redis://localhost:6379/0"
     # jwt settings
     JWT_SECRET: str
     JWT_ALG: str = "HS256"

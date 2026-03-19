@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ASYNC_DATABASE_URL: postgresql+asyncpg://dispatch:dispatch@localhost:5432/dispatch
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-secret
+      JWT_ALG: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      MAIL_HOST: localhost
+      MAIL_PORT: "25"
+      MAIL_USER: ""
+      MAIL_PASS: ""
+      MAIL_FROM: noreply@example.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
