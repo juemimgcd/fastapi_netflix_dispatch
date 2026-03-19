@@ -105,10 +105,4 @@ pytest -q
 - 安装依赖
 - 执行 `pytest -q`
 
-## 简历可写点（建议）
-
-- 设计并实现 Incident 全链路后端：事件、任务、通知、团队权限
-- 使用 SQLAlchemy Async + Alembic 管理可演进数据模型
-- 通过 Redis + WebSocket 支撑实时通知能力
-- 完成 Docker 化与 CI，具备可复现与可验证交付能力
 
