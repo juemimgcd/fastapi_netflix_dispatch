@@ -38,7 +38,7 @@ services:
     environment:
       ASYNC_DATABASE_URL: postgresql+asyncpg://dispatch:dispatch@db:5432/dispatch
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: change-me-in-production
+      JWT_SECRET: 3d1448389ecca877d3fd2dfc4cdad99b764196c675e59b6ef50f9c4a3220cdb0
       JWT_ALG: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "60"
       MAIL_HOST: localhost
@@ -63,7 +63,7 @@ services:
     environment:
       ASYNC_DATABASE_URL: postgresql+asyncpg://dispatch:dispatch@db:5432/dispatch
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: change-me-in-production
+      JWT_SECRET: 3d1448389ecca877d3fd2dfc4cdad99b764196c675e59b6ef50f9c4a3220cdb0
       JWT_ALG: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "60"
       MAIL_HOST: localhost
@@ -77,4 +77,3 @@ services:
 
 volumes:
   pg_data:
-
