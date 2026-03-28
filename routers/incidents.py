@@ -387,11 +387,6 @@ async def create_incident_comment(
                 message=message,
             )
 
-
-
-
-
-
         await db.commit()
         await db.refresh(comment)
 

@@ -40,7 +40,7 @@ async def set_cache(key: str, value: Any, expire: int = 5) -> bool:
 
 
 def make_cache_key(prefix: str, parts: dict[str, Any]) -> str:
-    segs: list[str] = [prefix]
+    seg: list[str] = [prefix]
     for k in sorted(parts.keys()):
         v = parts[k]
         if v is None:
@@ -49,11 +49,5 @@ def make_cache_key(prefix: str, parts: dict[str, Any]) -> str:
             v_str = "1" if v else "0"
         else:
             v_str = str(v)
-        segs.append(f"{k}={v_str}")
-    return "|".join(segs)
-
-
-
-
-
-
+        seg.append(f"{k}={v_str}")
+    return "|".join(seg)

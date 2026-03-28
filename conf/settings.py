@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     JWT_ALG: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    cors_origins: str = ""
+
     # mail settings
     MAIL_HOST: str = "localhost"
     MAIL_PORT: int = 25

@@ -1,6 +1,11 @@
+import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+from starlette.middleware.cors import CORSMiddleware
+
 from conf.db_conf import engine
+from conf.settings import settings
 from routers import router
 from utils.cache import redis_client
 
@@ -18,6 +23,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+cors_origins = [item.strip() for item in settings.cors_origins.split(",") if item.strip()]
+cors_options = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+
+if cors_origins:
+    cors_options["allow_origins"] = cors_origins
+else:
+    # Local Vue/Vite development usually runs on a random localhost port.
+    cors_options["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
+app.add_middleware(CORSMiddleware, **cors_options)
+
+
 app.include_router(router.api_router)
 
 
@@ -29,3 +51,7 @@ async def root():
 @app.get("/hello/{name}")
 async def say_hello(name: str):
     return {"message": f"Hello {name}"}
+
+
+if __name__ == '__main__':
+    uvicorn.run("main:app",port=8000,reload=True)
